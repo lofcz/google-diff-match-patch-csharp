@@ -1,0 +1,7 @@
+This is a fork of https://github.com/jhgbrt/google-diff-match-patch-csharp
+Licensed under Apache-2.0 license
+
+Changes:
+- minor performance improvements
+- retarget to .NET8+
+- ranged dependencies, minimizing conflicts

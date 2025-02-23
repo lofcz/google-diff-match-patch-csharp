@@ -4,6 +4,8 @@
     <LangVersion>preview</LangVersion>
     <Nullable>enable</Nullable>
     <TargetFramework>net8.0</TargetFramework>
+    <PackageId>SharpDiffMatchPatch</PackageId>
+    <Title>Jhgbrt, google-diff-match-patch-csharp Contributors, Matěj "lofcz" Štágl</Title>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.Collections.Immutable" Version="[8.0.0,)" />
