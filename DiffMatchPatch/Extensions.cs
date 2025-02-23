@@ -21,7 +21,7 @@ internal static class Extensions
 
     internal static IEnumerable<T> Concat<T>(this IEnumerable<T> items, T item)
     {
-        foreach (var i in items) yield return i;
+        foreach (T i in items) yield return i;
         yield return item;
     }
 
@@ -32,8 +32,8 @@ internal static class Extensions
 
     internal static IEnumerable<string> SplitBy(this string s, char separator)
     {
-        StringBuilder sb = new();
-        foreach (var c in s)
+        StringBuilder sb = new StringBuilder();
+        foreach (char c in s)
         {
             if (c == separator)
             {

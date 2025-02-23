@@ -1,8 +1,8 @@
-using static DiffMatchPatch.Operation;
+using static DiffMatchPatch.DiffOperation;
 
 namespace DiffMatchPatch;
 
-public static class DiffList
+public static partial class DiffList
 {
     /// <summary>
     /// Compute and return the source text (all equalities and deletions).
@@ -11,7 +11,7 @@ public static class DiffList
     /// <returns></returns>
     public static string Text1(this IEnumerable<Diff> diffs)
         => diffs
-        .Where(d => d.Operation != Insert)
+        .Where(d => d.DiffOperation != Insert)
         .Aggregate(new StringBuilder(), (sb, diff) => sb.Append(diff.Text))
         .ToString();
 
@@ -22,13 +22,13 @@ public static class DiffList
     /// <returns></returns>
     public static string Text2(this IEnumerable<Diff> diffs)
         => diffs
-        .Where(d => d.Operation != Delete)
+        .Where(d => d.DiffOperation != Delete)
         .Aggregate(new StringBuilder(), (sb, diff) => sb.Append(diff.Text))
         .ToString();
 
-    readonly record struct LevenshteinState(int Insertions, int Deletions, int Levenshtein)
+    private readonly record struct LevenshteinState(int Insertions, int Deletions, int Levenshtein)
     {
-        public LevenshteinState Consolidate() => new(0, 0, Levenshtein + Math.Max(Insertions, Deletions));
+        public LevenshteinState Consolidate() => new LevenshteinState(0, 0, Levenshtein + Math.Max(Insertions, Deletions));
     }
 
     /// <summary>
@@ -38,10 +38,10 @@ public static class DiffList
     /// <returns></returns>
     internal static int Levenshtein(this IEnumerable<Diff> diffs)
     {
-        var state = new LevenshteinState(0, 0, 0);
-        foreach (var aDiff in diffs)
+        LevenshteinState state = new LevenshteinState(0, 0, 0);
+        foreach (Diff aDiff in diffs)
         {
-            state = aDiff.Operation switch
+            state = aDiff.DiffOperation switch
             {
                 Insert => state with { Insertions = state.Insertions + aDiff.Text.Length },
                 Delete => state with { Deletions = state.Deletions + aDiff.Text.Length },
@@ -57,7 +57,7 @@ public static class DiffList
         .Append(content)
         .Append($"</{tag}>");
 
-    private static StringBuilder AppendHtml(this StringBuilder sb, Operation operation, string text) => operation switch
+    private static StringBuilder AppendHtml(this StringBuilder sb, DiffOperation diffOperation, string text) => diffOperation switch
     {
         Insert => sb.AppendHtml("ins", "#e6ffe6", text),
         Delete => sb.AppendHtml("del", "#ffe6e6", text),
@@ -71,12 +71,12 @@ public static class DiffList
     /// <param name="diffs"></param>
     /// <returns></returns>
     public static string PrettyHtml(this IEnumerable<Diff> diffs) => diffs
-        .Aggregate(new StringBuilder(), (sb, diff) => sb.AppendHtml(diff.Operation, diff.Text.HtmlEncodeLight()))
+        .Aggregate(new StringBuilder(), (sb, diff) => sb.AppendHtml(diff.DiffOperation, diff.Text.HtmlEncodeLight()))
         .ToString();
 
     private static string HtmlEncodeLight(this string s)
     {
-        var text = new StringBuilder(s)
+        string text = new StringBuilder(s)
             .Replace("&", "&amp;")
             .Replace("<", "&lt;")
             .Replace(">", "&gt;")
@@ -85,7 +85,7 @@ public static class DiffList
         return text;
     }
 
-    static char ToDelta(this Operation o) => o switch
+    private static char ToDelta(this DiffOperation o) => o switch
     {
         Delete => '-',
         Insert => '+',
@@ -93,7 +93,7 @@ public static class DiffList
         _ => throw new ArgumentException($"Unknown Operation: {o}")
     };
 
-    static Operation FromDelta(char c) => c switch
+    private static DiffOperation FromDelta(char c) => c switch
     {
         '-' => Delete,
         '+' => Insert,
@@ -112,15 +112,15 @@ public static class DiffList
     /// <returns></returns>
     public static string ToDelta(this IEnumerable<Diff> diffs)
     {
-        var s =
+        IEnumerable<string> s =
             from aDiff in diffs
-            let sign = aDiff.Operation.ToDelta()
-            let textToAppend = aDiff.Operation == Insert
+            let sign = aDiff.DiffOperation.ToDelta()
+            let textToAppend = aDiff.DiffOperation == Insert
                 ? aDiff.Text.UrlEncoded()
                 : aDiff.Text.Length.ToString()
             select string.Concat(sign, textToAppend);
 
-        var delta = string.Join("\t", s);
+        string delta = string.Join("\t", s);
         return delta;
     }
 
@@ -133,9 +133,9 @@ public static class DiffList
     /// <returns></returns>
     public static IEnumerable<Diff> FromDelta(string text1, string delta)
     {
-        var pointer = 0;  // Cursor in text1
+        int pointer = 0;  // Cursor in text1
 
-        foreach (var token in delta.SplitBy('\t'))
+        foreach (string token in delta.SplitBy('\t'))
         {
             if (token.Length == 0)
             {
@@ -144,10 +144,10 @@ public static class DiffList
             }
             // Each token begins with a one character parameter which specifies the
             // operation of this token (delete, insert, equality).
-            var param = token[1..];
-            var operation = FromDelta(token[0]);
+            string param = token[1..];
+            DiffOperation diffOperation = FromDelta(token[0]);
             int n = 0;
-            if (operation != Insert)
+            if (diffOperation != Insert)
             {
                 if (!int.TryParse(param, out n))
                 {
@@ -158,15 +158,15 @@ public static class DiffList
                     throw new ArgumentException($"Delta length ({pointer}) larger than source text length ({text1.Length}).");
                 }
             }
-            string text;
-            (text, pointer) = operation switch
+
+            (string text, pointer) = diffOperation switch
             {
                 Insert => (param.Replace("+", "%2b").UrlDecoded(), pointer),
                 Equal => (text1.Substring(pointer, n), pointer + n),
                 Delete => (text1.Substring(pointer, n), pointer + n),
-                _ => throw new ArgumentException($"Unknown Operation: {operation}")
+                _ => throw new ArgumentException($"Unknown Operation: {diffOperation}")
             };
-            yield return Diff.Create(operation, text);
+            yield return Diff.Create(diffOperation, text);
         }
         if (pointer != text1.Length)
         {
@@ -176,24 +176,24 @@ public static class DiffList
 
     internal static IEnumerable<Diff> CleanupMergePass1(this IEnumerable<Diff> diffs)
     {
-        var sbDelete = new StringBuilder();
-        var sbInsert = new StringBuilder();
+        StringBuilder sbDelete = new StringBuilder();
+        StringBuilder sbInsert = new StringBuilder();
 
         Diff lastEquality = Diff.Empty;
 
-        var enumerator = diffs.Concat(Diff.Empty).GetEnumerator();
+        IEnumerator<Diff> enumerator = diffs.Concat(Diff.Empty).GetEnumerator();
         while (enumerator.MoveNext())
         {
-            var diff = enumerator.Current;
+            Diff diff = enumerator.Current;
 
-            (sbInsert, sbDelete) = diff.Operation switch
+            (sbInsert, sbDelete) = diff.DiffOperation switch
             {
                 Insert => (sbInsert.Append(diff.Text), sbDelete),
                 Delete => (sbInsert, sbDelete.Append(diff.Text)),
                 _ => (sbInsert, sbDelete)
             };
 
-            switch (diff.Operation)
+            switch (diff.DiffOperation)
             {
                 case Equal:
                     // Upon reaching an equality, check for prior redundancies.
@@ -201,20 +201,20 @@ public static class DiffList
                     {
                         // first equality after number of inserts/deletes
                         // Factor out any common prefixies.
-                        var prefixLength = TextUtil.CommonPrefix(sbInsert, sbDelete);
+                        int prefixLength = TextUtil.CommonPrefix(sbInsert, sbDelete);
                         if (prefixLength > 0)
                         {
-                            var commonprefix = sbInsert.ToString(0, prefixLength);
+                            string commonprefix = sbInsert.ToString(0, prefixLength);
                             sbInsert.Remove(0, prefixLength);
                             sbDelete.Remove(0, prefixLength);
                             lastEquality = lastEquality.Append(commonprefix);
                         }
 
                         // Factor out any common suffixies.
-                        var suffixLength = TextUtil.CommonSuffix(sbInsert, sbDelete);
+                        int suffixLength = TextUtil.CommonSuffix(sbInsert, sbDelete);
                         if (suffixLength > 0)
                         {
-                            var commonsuffix = sbInsert.ToString(sbInsert.Length - suffixLength, suffixLength);
+                            string commonsuffix = sbInsert.ToString(sbInsert.Length - suffixLength, suffixLength);
                             sbInsert.Remove(sbInsert.Length - suffixLength, suffixLength);
                             sbDelete.Remove(sbDelete.Length - suffixLength, suffixLength);
                             diff = diff.Prepend(commonsuffix);
@@ -249,14 +249,14 @@ public static class DiffList
         // Second pass: look for single edits surrounded on both sides by
         // equalities which can be shifted sideways to eliminate an equality.
         // e.g: A<ins>BA</ins>C -> <ins>AB</ins>AC
-        var diffs = input.ToList();
+        List<Diff> diffs = input.ToList();
         // Intentionally ignore the first and last element (don't need checking).
-        for (var i = 1; i < diffs.Count - 1; i++)
+        for (int i = 1; i < diffs.Count - 1; i++)
         {
-            var previous = diffs[i - 1];
-            var current = diffs[i];
-            var next = diffs[i + 1];
-            if (previous.Operation == Equal && next.Operation == Equal)
+            Diff previous = diffs[i - 1];
+            Diff current = diffs[i];
+            Diff next = diffs[i + 1];
+            if (previous.DiffOperation == Equal && next.DiffOperation == Equal)
             {
                 ReadOnlySpan<char> currentSpan = current.Text.AsSpan();
                 ReadOnlySpan<char> previousSpan = previous.Text.AsSpan();
@@ -267,7 +267,7 @@ public static class DiffList
                     currentSpan[^previousSpan.Length..].SequenceEqual(previousSpan))
                 {
                     // Shift the edit over the previous equality.
-                    var text = previous.Text + current.Text[..^previous.Text.Length];
+                    string text = previous.Text + current.Text[..^previous.Text.Length];
                     diffs[i] = current.Replace(text);
                     diffs[i + 1] = next.Replace(previous.Text + next.Text);
                     diffs.Splice(i - 1, 1);
@@ -307,13 +307,13 @@ public static class DiffList
     }
 
 
-    readonly record struct EditBetweenEqualities(string Equality1, string Edit, string Equality2)
+    private readonly record struct EditBetweenEqualities(string Equality1, string Edit, string Equality2)
     {
         public int Score => DiffCleanupSemanticScore(Equality1, Edit) + DiffCleanupSemanticScore(Edit, Equality2);
 
-        readonly record struct ScoreHelper(string Str, Index I, Regex Regex)
+        private readonly record struct ScoreHelper(string Str, Index I, Regex Regex)
         {
-            char C => Str[I];
+            private char C => Str[I];
             public bool IsEmpty => Str.Length == 0;
             public bool NonAlphaNumeric => !char.IsLetterOrDigit(C);
             public bool IsWhitespace => char.IsWhiteSpace(C);
@@ -338,35 +338,33 @@ public static class DiffList
         // Shift the edit as far left as possible.
         public EditBetweenEqualities ShiftLeft()
         {
-            var commonOffset = TextUtil.CommonSuffix(Equality1, Edit);
+            int commonOffset = TextUtil.CommonSuffix(Equality1, Edit);
 
             if (commonOffset > 0)
             {
-                var commonString = Edit[^commonOffset..];
-                var equality1 = Equality1[..^commonOffset];
-                var edit = commonString + Edit[..^commonOffset];
-                var equality2 = commonString + Equality2;
-                return this with { Equality1 = equality1, Edit = edit, Equality2 = equality2 };
+                string? commonString = Edit[^commonOffset..];
+                string? equality1 = Equality1[..^commonOffset];
+                string edit = commonString + Edit[..^commonOffset];
+                string equality2 = commonString + Equality2;
+                return new EditBetweenEqualities(Equality1: equality1, Edit: edit, Equality2: equality2);
             }
-            else
-            {
-                return this;
-            }
+
+            return this;
         }
 
         // Shift one right
-        EditBetweenEqualities ShiftRight() => this with { Equality1 = Equality1 + Edit[0], Edit = Edit[1..] + Equality2[0], Equality2 = Equality2[1..] };
+        private EditBetweenEqualities ShiftRight() => new EditBetweenEqualities(Equality1: Equality1 + Edit[0], Edit: Edit[1..] + Equality2[0], Equality2: Equality2[1..]);
 
         public IEnumerable<EditBetweenEqualities> TraverseRight()
         {
-            var item = this;
+            EditBetweenEqualities item = this;
             while (item.Edit.Length != 0 && item.Equality2.Length != 0 && item.Edit[0] == item.Equality2[0])
             {
                 yield return item = item.ShiftRight();
             }
         }
 
-        public IEnumerable<Diff> ToDiffs(Operation edit)
+        public IEnumerable<Diff> ToDiffs(DiffOperation edit)
         {
             yield return Diff.Equal(Equality1);
             yield return Diff.Create(edit, Edit);
@@ -382,11 +380,11 @@ public static class DiffList
     /// <param name="diffs"></param>
     internal static IEnumerable<Diff> CleanupSemanticLossless(this IEnumerable<Diff> diffs)
     {
-        var enumerator = diffs.GetEnumerator();
+        IEnumerator<Diff> enumerator = diffs.GetEnumerator();
 
         if (!enumerator.MoveNext()) yield break;
 
-        var previous = enumerator.Current;
+        Diff previous = enumerator.Current;
 
         if (!enumerator.MoveNext())
         {
@@ -394,7 +392,7 @@ public static class DiffList
             yield break;
         }
 
-        var current = enumerator.Current;
+        Diff current = enumerator.Current;
 
         while (true)
         {
@@ -405,26 +403,25 @@ public static class DiffList
                 yield break;
             }
 
-            var next = enumerator.Current;
+            Diff next = enumerator.Current;
 
-            if (previous.Operation == Equal && next.Operation == Equal)
+            if (previous.DiffOperation == Equal && next.DiffOperation == Equal)
             {
                 // This is a single edit surrounded by equalities.
-                var item = new EditBetweenEqualities(previous.Text, current.Text, next.Text).ShiftLeft();
+                EditBetweenEqualities item = new EditBetweenEqualities(previous.Text, current.Text, next.Text).ShiftLeft();
 
                 // Second, step character by character right, looking for the best fit.
-                var best = item.TraverseRight().Aggregate(item, (best, x) => best.Score > x.Score ? best : x);
+                EditBetweenEqualities best = item.TraverseRight().Aggregate(item, (best, x) => best.Score > x.Score ? best : x);
 
                 if (previous.Text != best.Equality1)
                 {
                     // We have an improvement; yield the improvement instead of the original diffs
-                    foreach (var d in best.ToDiffs(current.Operation).Where(d => !d.IsEmpty))
+                    foreach (Diff d in best.ToDiffs(current.DiffOperation).Where(d => !d.IsEmpty))
                         yield return d;
 
                     if (!enumerator.MoveNext())
                         yield break;
 
-                    previous = current;
                     current = next;
                     next = enumerator.Current;
                 }
@@ -444,35 +441,35 @@ public static class DiffList
     }
 
     // Define some regex patterns for matching boundaries.
-    private static readonly Regex BlankLineEnd = new("\\n\\r?\\n\\Z", RegexOptions.Compiled);
-    private static readonly Regex BlankLineStart = new("\\A\\r?\\n\\r?\\n", RegexOptions.Compiled);
+    private static readonly Regex BlankLineEnd = BlankLineEndImpl();
+    private static readonly Regex BlankLineStart = BlankLineStartImpl();
 
     /// <summary>
     /// Reduce the number of edits by eliminating operationally trivial equalities.
     /// </summary>
-    /// <param name="diffs"></param>
+    /// <param name="input"></param>
     /// <param name="diffEditCost"></param>
     internal static IEnumerable<Diff> CleanupEfficiency(this IEnumerable<Diff> input, short diffEditCost = 4)
     {
-        var diffs = input.ToList();
-        var changes = false;
+        List<Diff> diffs = input.ToList();
+        bool changes = false;
         // Stack of indices where equalities are found.
-        var equalities = new Stack<int>();
+        Stack<int> equalities = new Stack<int>();
         // Always equal to equalities[equalitiesLength-1][1]
-        var lastEquality = string.Empty;
+        string lastEquality = string.Empty;
         // Is there an insertion operation before the last equality.
-        var insertionBeforeLastEquality = false;
+        bool insertionBeforeLastEquality = false;
         // Is there a deletion operation before the last equality.
-        var deletionBeforeLastEquality = false;
+        bool deletionBeforeLastEquality = false;
         // Is there an insertion operation after the last equality.
-        var insertionAfterLastEquality = false;
+        bool insertionAfterLastEquality = false;
         // Is there a deletion operation after the last equality.
-        var deletionAfterLastEquality = false;
+        bool deletionAfterLastEquality = false;
 
-        for (var i = 0; i < diffs.Count; i++)
+        for (int i = 0; i < diffs.Count; i++)
         {
-            var diff = diffs[i];
-            if (diff.Operation == Equal)
+            Diff diff = diffs[i];
+            if (diff.DiffOperation == Equal)
             {  // Equality found.
                 if (diff.Text.Length < diffEditCost && (insertionAfterLastEquality || deletionAfterLastEquality))
                 {
@@ -491,7 +488,7 @@ public static class DiffList
             }
             else
             {  // An insertion or deletion.
-                if (diff.Operation == Delete)
+                if (diff.DiffOperation == Delete)
                 {
                     deletionAfterLastEquality = true;
                 }
@@ -538,12 +535,7 @@ public static class DiffList
             }
         }
 
-        if (changes)
-        {
-            return diffs.CleanupMerge();
-        }
-
-        return input;
+        return changes ? diffs.CleanupMerge() : diffs;
     }
     /// <summary>
     /// A diff of two unrelated texts can be filled with coincidental matches. 
@@ -574,24 +566,24 @@ public static class DiffList
     /// <summary>
     /// Reduce the number of edits by eliminating semantically trivial equalities.
     /// </summary>
-    /// <param name="diffs"></param>
+    /// <param name="input"></param>
     internal static List<Diff> CleanupSemantic(this IEnumerable<Diff> input)
     {
-        var diffs = input.ToList();
+        List<Diff> diffs = input.ToList();
         // Stack of indices where equalities are found.
-        var equalities = new Stack<int>();
+        Stack<int> equalities = new Stack<int>();
         // Always equal to equalities[equalitiesLength-1][1]
         string? lastEquality = null;
-        var pointer = 0;  // Index of current position.
+        int pointer = 0;  // Index of current position.
                           // Number of characters that changed prior to the equality.
-        var lengthInsertions1 = 0;
-        var lengthDeletions1 = 0;
+        int lengthInsertions1 = 0;
+        int lengthDeletions1 = 0;
         // Number of characters that changed after the equality.
-        var lengthInsertions2 = 0;
-        var lengthDeletions2 = 0;
+        int lengthInsertions2 = 0;
+        int lengthDeletions2 = 0;
         while (pointer < diffs.Count)
         {
-            if (diffs[pointer].Operation == Equal)
+            if (diffs[pointer].DiffOperation == Equal)
             {  // Equality found.
                 equalities.Push(pointer);
                 lengthInsertions1 = lengthInsertions2;
@@ -602,7 +594,7 @@ public static class DiffList
             }
             else
             {  // an insertion or deletion
-                if (diffs[pointer].Operation == Insert)
+                if (diffs[pointer].DiffOperation == Insert)
                 {
                     lengthInsertions2 += diffs[pointer].Text.Length;
                 }
@@ -648,37 +640,37 @@ public static class DiffList
         pointer = 1;
         while (pointer < diffs.Count)
         {
-            if (diffs[pointer - 1].Operation == Delete &&
-                diffs[pointer].Operation == Insert)
+            if (diffs[pointer - 1].DiffOperation == Delete &&
+                diffs[pointer].DiffOperation == Insert)
             {
-                var deletion = diffs[pointer - 1].Text.AsSpan();
-                var insertion = diffs[pointer].Text.AsSpan();
-                var overlapLength1 = TextUtil.CommonOverlap(deletion, insertion);
-                var overlapLength2 = TextUtil.CommonOverlap(insertion, deletion);
-                var minLength = Math.Min(deletion.Length, insertion.Length);
+                ReadOnlySpan<char> deletion = diffs[pointer - 1].Text.AsSpan();
+                ReadOnlySpan<char> insertion = diffs[pointer].Text.AsSpan();
+                int overlapLength1 = TextUtil.CommonOverlap(deletion, insertion);
+                int overlapLength2 = TextUtil.CommonOverlap(insertion, deletion);
+                int minLength = Math.Min(deletion.Length, insertion.Length);
 
                 Diff[]? newdiffs = null;
                 if ((overlapLength1 >= overlapLength2) && (overlapLength1 >= minLength / 2.0))
                 {
                     // Overlap found.
                     // Insert an equality and trim the surrounding edits.
-                    newdiffs = new[]
-                    {
-                            Diff.Delete(deletion.Slice(0, deletion.Length - overlapLength1).ToArray()),
-                            Diff.Equal(insertion.Slice(0, overlapLength1).ToArray()),
+                    newdiffs =
+                    [
+                        Diff.Delete(deletion[..^overlapLength1].ToArray()),
+                            Diff.Equal(insertion[..overlapLength1].ToArray()),
                             Diff.Insert(insertion[overlapLength1..].ToArray())
-                        };
+                    ];
                 }
                 else if ((overlapLength2 >= overlapLength1) && overlapLength2 >= minLength / 2.0)
                 {
                     // Reverse overlap found.
                     // Insert an equality and swap and trim the surrounding edits.
-                    newdiffs = new[]
-                    {
-                                Diff.Insert(insertion.Slice(0, insertion.Length - overlapLength2)),
-                                Diff.Equal(deletion.Slice(0, overlapLength2)),
+                    newdiffs =
+                    [
+                        Diff.Insert(insertion[..^overlapLength2]),
+                                Diff.Equal(deletion[..overlapLength2]),
                                 Diff.Delete(deletion[overlapLength2..])
-                        };
+                    ];
                 }
 
                 if (newdiffs != null)
@@ -703,10 +695,10 @@ public static class DiffList
     /// <returns></returns>
     internal static IEnumerable<Diff> CharsToLines(this ICollection<Diff> diffs, IList<string> lineArray)
     {
-        foreach (var diff in diffs)
+        foreach (Diff diff in diffs)
         {
-            var text = new StringBuilder();
-            foreach (var c in diff.Text)
+            StringBuilder text = new StringBuilder();
+            foreach (char c in diff.Text)
             {
                 text.Append(lineArray[c]);
             }
@@ -722,19 +714,19 @@ public static class DiffList
     /// <returns>location in target</returns>
     internal static int FindEquivalentLocation2(this IEnumerable<Diff> diffs, int location1)
     {
-        var chars1 = 0;
-        var chars2 = 0;
-        var lastChars1 = 0;
-        var lastChars2 = 0;
+        int chars1 = 0;
+        int chars2 = 0;
+        int lastChars1 = 0;
+        int lastChars2 = 0;
         Diff lastDiff = Diff.Empty;
-        foreach (var aDiff in diffs)
+        foreach (Diff aDiff in diffs)
         {
-            if (aDiff.Operation != Insert)
+            if (aDiff.DiffOperation != Insert)
             {
                 // Equality or deletion.
                 chars1 += aDiff.Text.Length;
             }
-            if (aDiff.Operation != Delete)
+            if (aDiff.DiffOperation != Delete)
             {
                 // Equality or insertion.
                 chars2 += aDiff.Text.Length;
@@ -748,7 +740,7 @@ public static class DiffList
             lastChars1 = chars1;
             lastChars2 = chars2;
         }
-        if (lastDiff.Operation == Delete)
+        if (lastDiff.DiffOperation == Delete)
         {
             // The location was deleted.
             return lastChars2;
@@ -757,5 +749,8 @@ public static class DiffList
         return lastChars2 + (location1 - lastChars1);
     }
 
-
+    [GeneratedRegex("\\n\\r?\\n\\Z", RegexOptions.Compiled)]
+    private static partial Regex BlankLineEndImpl();
+    [GeneratedRegex("\\A\\r?\\n\\r?\\n", RegexOptions.Compiled)]
+    private static partial Regex BlankLineStartImpl();
 }

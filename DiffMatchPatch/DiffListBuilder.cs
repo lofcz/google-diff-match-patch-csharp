@@ -16,8 +16,8 @@ internal static class DiffListBuilder
             return (start1, length1, start2, length2);
         }
 
-        var pattern = text.Substring(start2, length1);
-        var padding = 0;
+        string pattern = text.Substring(start2, length1);
+        int padding = 0;
 
         // Look for the first and last matches of pattern in text.  If two
         // different matches are found, increase the pattern length.
@@ -26,23 +26,23 @@ internal static class DiffListBuilder
                && pattern.Length < Constants.MatchMaxBits - patchMargin - patchMargin)
         {
             padding += patchMargin;
-            var begin = Math.Max(0, start2 - padding);
+            int begin = Math.Max(0, start2 - padding);
             pattern = text[begin..Math.Min(text.Length, start2 + length1 + padding)];
         }
         // Add one chunk for good luck.
         padding += patchMargin;
 
         // Add the prefix.
-        var begin1 = Math.Max(0, start2 - padding);
-        var prefix = text[begin1..start2];
+        int begin1 = Math.Max(0, start2 - padding);
+        string prefix = text[begin1..start2];
         if (prefix.Length != 0)
         {
             diffListBuilder.Insert(0, Diff.Equal(prefix));
         }
         // Add the suffix.
-        var begin2 = start2 + length1;
-        var length = Math.Min(text.Length, start2 + length1 + padding) - begin2;
-        var suffix = text.Substring(begin2, length);
+        int begin2 = start2 + length1;
+        int length = Math.Min(text.Length, start2 + length1 + padding) - begin2;
+        string suffix = text.Substring(begin2, length);
         if (suffix.Length != 0)
         {
             diffListBuilder.Add(Diff.Equal(suffix));

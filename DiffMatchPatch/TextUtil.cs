@@ -1,6 +1,6 @@
 namespace DiffMatchPatch;
 
-internal static class TextUtil
+internal static partial class TextUtil
 {
     /// <summary>
     /// Determine the common prefix of two strings as the number of characters common to the start of each string.
@@ -12,10 +12,10 @@ internal static class TextUtil
     /// <returns>The number of characters common to the start of each string.</returns>
     internal static int CommonPrefix(ReadOnlySpan<char> text1, ReadOnlySpan<char> text2, int i1 = 0, int i2 = 0)
     {
-        var l1 = text1.Length - i1;
-        var l2 = text2.Length - i2;
-        var n = Math.Min(l1, l2);
-        for (var i = 0; i < n; i++)
+        int l1 = text1.Length - i1;
+        int l2 = text2.Length - i2;
+        int n = Math.Min(l1, l2);
+        for (int i = 0; i < n; i++)
         {
             if (text1[i + i1] != text2[i + i2])
             {
@@ -27,8 +27,8 @@ internal static class TextUtil
 
     internal static int CommonPrefix(StringBuilder text1, StringBuilder text2)
     {
-        var n = Math.Min(text1.Length, text2.Length);
-        for (var i = 0; i < n; i++)
+        int n = Math.Min(text1.Length, text2.Length);
+        for (int i = 0; i < n; i++)
         {
             if (text1[i] != text2[i])
             {
@@ -47,10 +47,10 @@ internal static class TextUtil
     /// <returns>The number of characters common to the end of each string.</returns>
     internal static int CommonSuffix(ReadOnlySpan<char> text1, ReadOnlySpan<char> text2, int? l1 = null, int? l2 = null)
     {
-        var text1Length = l1 ?? text1.Length;
-        var text2Length = l2 ?? text2.Length;
-        var n = Math.Min(text1Length, text2Length);
-        for (var i = 1; i <= n; i++)
+        int text1Length = l1 ?? text1.Length;
+        int text2Length = l2 ?? text2.Length;
+        int n = Math.Min(text1Length, text2Length);
+        for (int i = 1; i <= n; i++)
         {
             if (text1[text1Length - i] != text2[text2Length - i])
             {
@@ -61,10 +61,10 @@ internal static class TextUtil
     }
     internal static int CommonSuffix(StringBuilder text1, StringBuilder text2)
     {
-        var text1Length = text1.Length;
-        var text2Length = text2.Length;
-        var n = Math.Min(text1Length, text2Length);
-        for (var i = 1; i <= n; i++)
+        int text1Length = text1.Length;
+        int text2Length = text2.Length;
+        int n = Math.Min(text1Length, text2Length);
+        for (int i = 1; i <= n; i++)
         {
             if (text1[text1Length - i] != text2[text2Length - i])
             {
@@ -86,8 +86,8 @@ internal static class TextUtil
     internal static int CommonOverlap(ReadOnlySpan<char> text1, ReadOnlySpan<char> text2)
     {
         // Cache the text lengths to prevent multiple calls.
-        var text1Length = text1.Length;
-        var text2Length = text2.Length;
+        int text1Length = text1.Length;
+        int text2Length = text2.Length;
         // Eliminate the null case.
         if (text1Length == 0 || text2Length == 0)
         {
@@ -100,17 +100,17 @@ internal static class TextUtil
         }
         else if (text1Length < text2Length)
         {
-            text2 = text2.Slice(0, text1Length);
+            text2 = text2[..text1Length];
         }
 
-        var textLength = Math.Min(text1Length, text2Length);
+        int textLength = Math.Min(text1Length, text2Length);
 
         // look for last character of text1 in text2, from the end to the beginning
         // where text1 ends with the pattern from beginning of text2 until that character
-        var last = text1[^1];
+        char last = text1[^1];
         for (int length = text2.Length; length > 0; length--)
         {
-            if (text2[length - 1] == last && text1.EndsWith(text2.Slice(0, length)))
+            if (text2[length - 1] == last && text1.EndsWith(text2[..length]))
                 return length;
         }
         return 0;
@@ -128,10 +128,10 @@ internal static class TextUtil
     private static HalfMatchResult HalfMatchI(ReadOnlySpan<char> longtext, ReadOnlySpan<char> shorttext, int i)
     {
         // Start with a 1/4 length Substring at position i as a seed.
-        var seed = longtext.Slice(i, longtext.Length / 4);
-        var j = -1;
+        ReadOnlySpan<char> seed = longtext.Slice(i, longtext.Length / 4);
+        int j = -1;
 
-        var bestCommon = string.Empty;
+        string bestCommon = string.Empty;
         string bestLongtextA = string.Empty, bestLongtextB = string.Empty;
         string bestShorttextA = string.Empty, bestShorttextB = string.Empty;
 
@@ -139,19 +139,19 @@ internal static class TextUtil
         while (n < shorttext.Length && (j = shorttext[(j + 1)..].IndexOf(seed, StringComparison.Ordinal)) != -1)
         {
             j = n = j + n + 1;
-            var prefixLength = CommonPrefix(longtext, shorttext, i, j);
-            var suffixLength = CommonSuffix(longtext, shorttext, i, j);
+            int prefixLength = CommonPrefix(longtext, shorttext, i, j);
+            int suffixLength = CommonSuffix(longtext, shorttext, i, j);
             if (bestCommon.Length < suffixLength + prefixLength)
             {
                 bestCommon = shorttext.Slice(j - suffixLength, suffixLength).ToString() + shorttext.Slice(j, prefixLength).ToString();
-                bestLongtextA = longtext.Slice(0, i - suffixLength).ToString();
+                bestLongtextA = longtext[..(i - suffixLength)].ToString();
                 bestLongtextB = longtext[(i + prefixLength)..].ToString();
-                bestShorttextA = shorttext.Slice(0, j - suffixLength).ToString();
+                bestShorttextA = shorttext[..(j - suffixLength)].ToString();
                 bestShorttextB = shorttext[(j + prefixLength)..].ToString();
             }
         }
         return bestCommon.Length * 2 >= longtext.Length
-            ? new(bestLongtextA, bestLongtextB, bestShorttextA, bestShorttextB, bestCommon)
+            ? new HalfMatchResult(bestLongtextA, bestLongtextB, bestShorttextA, bestShorttextB, bestCommon)
             : HalfMatchResult.Empty;
     }
 
@@ -167,19 +167,19 @@ internal static class TextUtil
     /// the prefix and suffix of string 2, and the common middle. Null if there was no match.</returns>
     internal static HalfMatchResult HalfMatch(ReadOnlySpan<char> text1, ReadOnlySpan<char> text2)
     {
-        var longtext = text1.Length > text2.Length ? text1 : text2;
-        var shorttext = text1.Length > text2.Length ? text2 : text1;
+        ReadOnlySpan<char> longtext = text1.Length > text2.Length ? text1 : text2;
+        ReadOnlySpan<char> shorttext = text1.Length > text2.Length ? text2 : text1;
         if (longtext.Length < 4 || shorttext.Length * 2 < longtext.Length)
         {
             return HalfMatchResult.Empty; // Pointless.
         }
 
         // First check if the second quarter is the seed for a half-match.
-        var hm1 = HalfMatchI(longtext, shorttext, (longtext.Length + 3) / 4);
+        HalfMatchResult hm1 = HalfMatchI(longtext, shorttext, (longtext.Length + 3) / 4);
         // Check again based on the third quarter.
-        var hm2 = HalfMatchI(longtext, shorttext, (longtext.Length + 1) / 2);
+        HalfMatchResult hm2 = HalfMatchI(longtext, shorttext, (longtext.Length + 1) / 2);
 
-        var hm = (hm1, hm2) switch
+        HalfMatchResult hm = (hm1, hm2) switch
         {
             { hm1.IsEmpty: true } and { hm2.IsEmpty: true } => hm1,
             { hm2.IsEmpty: true } => hm1,
@@ -190,7 +190,7 @@ internal static class TextUtil
 
         return text1.Length > text2.Length ? hm : -hm;
     }
-    private static readonly Regex HEXCODE = new("%[0-9A-F][0-9A-F]");
+    private static readonly Regex HEXCODE = HexcodeImpl();
 
 
     /// <summary>
@@ -204,7 +204,7 @@ internal static class TextUtil
         int MAX_LENGTH = 0xFFEF;
         // C# throws a System.UriFormatException if string is too long.
         // Split the string into 64kb chunks.
-        StringBuilder sb = new();
+        StringBuilder sb = new StringBuilder();
         int index = 0;
         while (index + MAX_LENGTH < str.Length)
         {
@@ -264,7 +264,10 @@ internal static class TextUtil
         }
 
         // Do a fuzzy compare.
-        var bitap = new BitapAlgorithm(settings);
+        BitapAlgorithm bitap = new BitapAlgorithm(settings);
         return bitap.Match(text, pattern, loc);
     }
+
+    [GeneratedRegex("%[0-9A-F][0-9A-F]")]
+    private static partial Regex HexcodeImpl();
 }

@@ -237,11 +237,11 @@ namespace DiffMatchPatch.Tests
             var text = Tuple.Create(new StringBuilder(), new StringBuilder());
             foreach (var myDiff in diffs)
             {
-                if (myDiff.Operation != Operation.Insert)
+                if (myDiff.DiffOperation != DiffOperation.Insert)
                 {
                     text.Item1.Append(myDiff.Text);
                 }
-                if (myDiff.Operation != Operation.Delete)
+                if (myDiff.DiffOperation != DiffOperation.Delete)
                 {
                     text.Item2.Append(myDiff.Text);
                 }

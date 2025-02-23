@@ -1,6 +1,6 @@
 namespace DiffMatchPatch;
 
-public enum Operation
+public enum DiffOperation
 {
     Delete = '-',
     Insert = '+',

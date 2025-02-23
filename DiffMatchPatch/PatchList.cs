@@ -1,11 +1,11 @@
-using static DiffMatchPatch.Operation;
+using static DiffMatchPatch.DiffOperation;
 
 namespace DiffMatchPatch;
 
-public static class PatchList
+public static partial class PatchList
 {
 
-    internal static readonly string NullPadding = new(Enumerable.Range(1, 4).Select(i => (char)i).ToArray());
+    internal static readonly string NullPadding = new string(Enumerable.Range(1, 4).Select(i => (char)i).ToArray());
 
     /// <summary>
     /// Add some padding on text start and end so that edges can match something.
@@ -16,9 +16,9 @@ public static class PatchList
     /// <returns>The padding string added to each side.</returns>
     internal static IEnumerable<Patch> AddPadding(this IEnumerable<Patch> patches, string padding)
     {
-        var paddingLength = padding.Length;
+        int paddingLength = padding.Length;
 
-        var enumerator = patches.GetEnumerator();
+        IEnumerator<Patch> enumerator = patches.GetEnumerator();
 
         if (!enumerator.MoveNext())
             yield break;
@@ -28,7 +28,7 @@ public static class PatchList
         bool isfirst = true;
         while (true)
         {
-            var hasnext = enumerator.MoveNext();
+            bool hasnext = enumerator.MoveNext();
             if (hasnext)
                 next = enumerator.Current.Bump(paddingLength);
 
@@ -55,7 +55,7 @@ public static class PatchList
     /// <returns></returns>
     public static string ToText(this IEnumerable<Patch> patches) => patches.Aggregate(new StringBuilder(), (sb, patch) => sb.Append(patch)).ToString();
 
-    static readonly Regex PatchHeader = new("^@@ -(\\d+),?(\\d*) \\+(\\d+),?(\\d*) @@$");
+    private static readonly Regex PatchHeader = PatchHeaderImpl();
 
     /// <summary>
     /// Parse a textual representation of patches and return a List of Patch
@@ -63,26 +63,27 @@ public static class PatchList
     /// <param name="text"></param>
     /// <returns></returns>
     public static ImmutableList<Patch> Parse(string text) => ParseImpl(text).ToImmutableList();
-    static IEnumerable<Patch> ParseImpl(string text)
+
+    private static IEnumerable<Patch> ParseImpl(string text)
     {
         if (text.Length == 0)
         {
             yield break;
         }
 
-        var lines = text.SplitBy('\n').ToArray();
-        var index = 0;
+        string[] lines = text.SplitBy('\n').ToArray();
+        int index = 0;
         while (index < lines.Length)
         {
-            var line = lines[index];
-            var m = PatchHeader.Match(line);
+            string line = lines[index];
+            Match m = PatchHeader.Match(line);
             if (!m.Success)
             {
                 throw new ArgumentException("Invalid patch string: " + line);
             }
 
-            (var start1, var length1) = m.GetStartAndLength(1, 2);
-            (var start2, var length2) = m.GetStartAndLength(3, 4);
+            (int start1, int length1) = m.GetStartAndLength(1, 2);
+            (int start2, int length2) = m.GetStartAndLength(3, 4);
 
             index++;
 
@@ -93,7 +94,7 @@ public static class PatchList
                     line = lines[index];
                     if (!string.IsNullOrEmpty(line))
                     {
-                        var sign = line[0];
+                        char sign = line[0];
                         if (sign == '@') // Start of next patch.
                             break;
                         yield return sign switch
@@ -121,10 +122,10 @@ public static class PatchList
     }
 
 
-    static (int start, int length) GetStartAndLength(this Match m, int startIndex, int lengthIndex)
+    private static (int start, int length) GetStartAndLength(this Match m, int startIndex, int lengthIndex)
     {
-        var lengthStr = m.Groups[lengthIndex].Value;
-        var value = Convert.ToInt32(m.Groups[startIndex].Value);
+        string lengthStr = m.Groups[lengthIndex].Value;
+        int value = Convert.ToInt32(m.Groups[startIndex].Value);
         return lengthStr switch
         {
             "0" => (value, 0),
@@ -160,29 +161,31 @@ public static class PatchList
     public static (string newText, bool[] results) Apply(this IEnumerable<Patch> input, string text,
         MatchSettings matchSettings, PatchSettings settings)
     {
-        if (!input.Any())
+        List<Patch> list = input.ToList();
+        
+        if (list.Count is 0)
         {
-            return (text, new bool[0]);
+            return (text, []);
         }
 
-        var nullPadding = NullPadding;
+        string nullPadding = NullPadding;
         text = nullPadding + text + nullPadding;
 
-        var patches = input.AddPadding(nullPadding).SplitMax().ToList();
+        List<Patch> patches = list.AddPadding(nullPadding).SplitMax().ToList();
 
-        var x = 0;
+        int x = 0;
         // delta keeps track of the offset between the expected and actual
         // location of the previous patch.  If there are patches expected at
         // positions 10 and 20, but the first patch was found at 12, delta is 2
         // and the second patch has an effective expected position of 22.
-        var delta = 0;
-        var results = new bool[patches.Count];
-        foreach (var aPatch in patches)
+        int delta = 0;
+        bool[] results = new bool[patches.Count];
+        foreach (Patch aPatch in patches)
         {
-            var expectedLoc = aPatch.Start2 + delta;
-            var text1 = aPatch.Diffs.Text1();
+            int expectedLoc = aPatch.Start2 + delta;
+            string text1 = aPatch.Diffs.Text1();
             int startLoc;
-            var endLoc = -1;
+            int endLoc = -1;
             if (text1.Length > Constants.MatchMaxBits)
             {
                 // patch_splitMax will only provide an oversized pattern
@@ -218,16 +221,8 @@ public static class PatchList
                 // Found a match.  :)
                 results[x] = true;
                 delta = startLoc - expectedLoc;
-                int actualEndLoc;
-                if (endLoc == -1)
-                {
-                    actualEndLoc = Math.Min(startLoc + text1.Length, text.Length);
-                }
-                else
-                {
-                    actualEndLoc = Math.Min(endLoc + Constants.MatchMaxBits, text.Length);
-                }
-                var text2 = text[startLoc..actualEndLoc];
+                int actualEndLoc = endLoc == -1 ? Math.Min(startLoc + text1.Length, text.Length) : Math.Min(endLoc + Constants.MatchMaxBits, text.Length);
+                string text2 = text[startLoc..actualEndLoc];
                 if (text1 == text2)
                 {
                     // Perfect match, just shove the Replacement text in.
@@ -238,7 +233,7 @@ public static class PatchList
                 {
                     // Imperfect match.  Run a diff to get a framework of equivalent
                     // indices.
-                    var diffs = Diff.Compute(text1, text2, 0f, false);
+                    ImmutableList<Diff> diffs = Diff.Compute(text1, text2, 0f, false);
                     if (text1.Length > Constants.MatchMaxBits
                         && diffs.Levenshtein() / (float)text1.Length
                         > settings.PatchDeleteThreshold)
@@ -249,24 +244,20 @@ public static class PatchList
                     else
                     {
                         diffs = diffs.CleanupSemanticLossless().ToImmutableList();
-                        var index1 = 0;
-                        foreach (var aDiff in aPatch.Diffs)
+                        int index1 = 0;
+                        foreach (Diff aDiff in aPatch.Diffs)
                         {
-                            if (aDiff.Operation != Equal)
+                            if (aDiff.DiffOperation != Equal)
                             {
-                                var index2 = diffs.FindEquivalentLocation2(index1);
-                                if (aDiff.Operation == Insert)
+                                int index2 = diffs.FindEquivalentLocation2(index1);
+                                text = aDiff.DiffOperation switch
                                 {
-                                    // Insertion
-                                    text = text.Insert(startLoc + index2, aDiff.Text);
-                                }
-                                else if (aDiff.Operation == Delete)
-                                {
-                                    // Deletion
-                                    text = text.Remove(startLoc + index2, diffs.FindEquivalentLocation2(index1 + aDiff.Text.Length) - index2);
-                                }
+                                    Insert => text.Insert(startLoc + index2, aDiff.Text),
+                                    Delete => text.Remove(startLoc + index2, diffs.FindEquivalentLocation2(index1 + aDiff.Text.Length) - index2),
+                                    _ => text
+                                };
                             }
-                            if (aDiff.Operation != Delete)
+                            if (aDiff.DiffOperation != Delete)
                             {
                                 index1 += aDiff.Text.Length;
                             }
@@ -290,8 +281,8 @@ public static class PatchList
     /// <param name="patchMargin"></param>
     internal static IEnumerable<Patch> SplitMax(this IEnumerable<Patch> patches, short patchMargin = 4)
     {
-        var patchSize = Constants.MatchMaxBits;
-        foreach (var patch in patches)
+        const short patchSize = Constants.MatchMaxBits;
+        foreach (Patch patch in patches)
         {
             if (patch.Length1 <= patchSize)
             {
@@ -299,30 +290,29 @@ public static class PatchList
                 continue;
             }
 
-            var bigpatch = patch;
             // Remove the big old patch.
-            (var start1, _, var start2, _, var diffs) = bigpatch;
+            (int start1, _, int start2, _, ImmutableListWithValueSemantics<Diff> diffs) = patch;
 
-            var precontext = string.Empty;
-            while (diffs.Any())
+            string precontext = string.Empty;
+            while (!diffs.IsEmpty)
             {
                 // Create one of several smaller patches.
                 (int s1, int l1, int s2, int l2, List<Diff> thediffs)
-                    = (start1 - precontext.Length, precontext.Length, start2 - precontext.Length, precontext.Length, new List<Diff>());
+                    = (start1 - precontext.Length, precontext.Length, start2 - precontext.Length, precontext.Length, []);
 
-                var empty = true;
+                bool empty = true;
 
                 if (precontext.Length != 0)
                 {
                     thediffs.Add(Diff.Equal(precontext));
                 }
-                while (diffs.Any() && l1 < patchSize - patchMargin)
+                while (!diffs.IsEmpty && l1 < patchSize - patchMargin)
                 {
-                    var first = diffs[0];
-                    var diffType = diffs[0].Operation;
-                    var diffText = diffs[0].Text;
+                    Diff first = diffs[0];
+                    DiffOperation diffType = diffs[0].DiffOperation;
+                    string diffText = diffs[0].Text;
 
-                    if (first.Operation == Insert)
+                    if (first.DiffOperation == Insert)
                     {
                         // Insertions are harmless.
                         l2 += diffText.Length;
@@ -331,7 +321,7 @@ public static class PatchList
                         diffs = diffs.RemoveAt(0);
                         empty = false;
                     }
-                    else if (first.IsLargeDelete(2 * patchSize) && thediffs.Count == 1 && thediffs[0].Operation == Equal)
+                    else if (first.IsLargeDelete(2 * patchSize) && thediffs.Count == 1 && thediffs[0].DiffOperation == Equal)
                     {
                         // This is a large deletion.  Let it pass in one chunk.
                         l1 += diffText.Length;
@@ -343,7 +333,7 @@ public static class PatchList
                     else
                     {
                         // Deletion or equality.  Only take as much as we can stomach.
-                        var cutoff = diffText[..Math.Min(diffText.Length, patchSize - l1 - patchMargin)];
+                        string cutoff = diffText[..Math.Min(diffText.Length, patchSize - l1 - patchMargin)];
                         l1 += cutoff.Length;
                         start1 += cutoff.Length;
                         if (diffType == Equal)
@@ -356,14 +346,7 @@ public static class PatchList
                             empty = false;
                         }
                         thediffs.Add(Diff.Create(diffType, cutoff));
-                        if (cutoff == first.Text)
-                        {
-                            diffs = diffs.RemoveAt(0);
-                        }
-                        else
-                        {
-                            diffs = diffs.RemoveAt(0).Insert(0, first with { Text = first.Text[cutoff.Length..] });
-                        }
+                        diffs = cutoff == first.Text ? diffs.RemoveAt(0) : diffs.RemoveAt(0).Insert(0, first with { Text = first.Text[cutoff.Length..] });
                     }
                 }
                 
@@ -374,15 +357,15 @@ public static class PatchList
                 precontext = precontext[Math.Max(0, precontext.Length - patchMargin)..];
 
                 // Append the end context for this patch.
-                var text1 = diffs.Text1();
-                var postcontext = text1.Length > patchMargin ? text1[..patchMargin] : text1;
+                string text1 = diffs.Text1();
+                string postcontext = text1.Length > patchMargin ? text1[..patchMargin] : text1;
 
                 if (postcontext.Length != 0)
                 {
                     l1 += postcontext.Length;
                     l2 += postcontext.Length;
-                    var lastDiff = thediffs.Last();
-                    if (thediffs.Count > 0 && lastDiff.Operation == Equal)
+                    Diff lastDiff = thediffs.Last();
+                    if (thediffs.Count > 0 && lastDiff.DiffOperation == Equal)
                         thediffs[^1] = lastDiff.Append(postcontext);
                     else
                         thediffs.Add(Diff.Equal(postcontext));
@@ -394,4 +377,7 @@ public static class PatchList
             }
         }
     }
+
+    [GeneratedRegex("^@@ -(\\d+),?(\\d*) \\+(\\d+),?(\\d*) @@$")]
+    private static partial Regex PatchHeaderImpl();
 }

@@ -1,4 +1,4 @@
-using static DiffMatchPatch.Operation;
+using static DiffMatchPatch.DiffOperation;
 
 namespace DiffMatchPatch;
 
@@ -7,14 +7,14 @@ public record Patch(int Start1, int Length1, int Start2, int Length2, ImmutableL
     public Patch Bump(int length) => this with { Start1 = Start1 + length, Start2 = Start2 + length };
 
     public bool IsEmpty => Diffs.IsEmpty;
-    public bool StartsWith(Operation operation) => Diffs[0].Operation == operation;
-    public bool EndsWith(Operation operation) => Diffs[^1].Operation == operation;
+    public bool StartsWith(DiffOperation diffOperation) => Diffs[0].DiffOperation == diffOperation;
+    public bool EndsWith(DiffOperation diffOperation) => Diffs[^1].DiffOperation == diffOperation;
 
     internal Patch AddPaddingInFront(string padding)
     {
-        (var s1, var l1, var s2, var l2, var diffs) = this;
+        (int s1, int l1, int s2, int l2, ImmutableListWithValueSemantics<Diff> diffs) = this;
 
-        var builder = diffs.ToBuilder();
+        ImmutableList<Diff>.Builder builder = diffs.ToBuilder();
         (s1, l1, s2, l2) = AddPaddingInFront(builder, s1, l1, s2, l2, padding);
 
         return new Patch(s1, l1, s2, l2, builder.ToImmutable());
@@ -22,9 +22,9 @@ public record Patch(int Start1, int Length1, int Start2, int Length2, ImmutableL
 
     internal Patch AddPaddingAtEnd(string padding)
     {
-        (var s1, var l1, var s2, var l2, var diffs) = this;
+        (int s1, int l1, int s2, int l2, ImmutableListWithValueSemantics<Diff> diffs) = this;
 
-        var builder = diffs.ToBuilder();
+        ImmutableList<Diff>.Builder builder = diffs.ToBuilder();
         (s1, l1, s2, l2) = AddPaddingAtEnd(builder, s1, l1, s2, l2, padding);
 
         return new Patch(s1, l1, s2, l2, builder.ToImmutable());
@@ -32,9 +32,9 @@ public record Patch(int Start1, int Length1, int Start2, int Length2, ImmutableL
 
     internal Patch AddPadding(string padding)
     {
-        (var s1, var l1, var s2, var l2, var diffs) = this;
+        (int s1, int l1, int s2, int l2, ImmutableListWithValueSemantics<Diff> diffs) = this;
 
-        var builder = diffs.ToBuilder();
+        ImmutableList<Diff>.Builder builder = diffs.ToBuilder();
         (s1, l1, s2, l2) = AddPaddingInFront(builder, s1, l1, s2, l2, padding);
         (s1, l1, s2, l2) = AddPaddingAtEnd(builder, s1, l1, s2, l2, padding);
 
@@ -48,20 +48,19 @@ public record Patch(int Start1, int Length1, int Start2, int Length2, ImmutableL
             builder.Insert(0, Diff.Equal(padding));
             return (s1 - padding.Length, l1 + padding.Length, s2 - padding.Length, l2 + padding.Length);
         }
-        else if (padding.Length > Diffs[0].Text.Length)
+
+        if (padding.Length > Diffs[0].Text.Length)
         {
-            var firstDiff = Diffs[0];
-            var extraLength = padding.Length - firstDiff.Text.Length;
-            var text = padding[firstDiff.Text.Length..] + firstDiff.Text;
+            Diff firstDiff = Diffs[0];
+            int extraLength = padding.Length - firstDiff.Text.Length;
+            string text = padding[firstDiff.Text.Length..] + firstDiff.Text;
 
             builder.RemoveAt(0);
             builder.Insert(0, firstDiff.Replace(text));
             return (s1 - extraLength, l1 + extraLength, s2 - extraLength, l2 + extraLength);
         }
-        else
-        {
-            return (s1, l1, s2, l2);
-        }
+
+        return (s1, l1, s2, l2);
 
     }
 
@@ -72,21 +71,20 @@ public record Patch(int Start1, int Length1, int Start2, int Length2, ImmutableL
             builder.Add(Diff.Equal(padding));
             return (s1, l1 + padding.Length, s2, l2 + padding.Length);
         }
-        else if (padding.Length > Diffs[^1].Text.Length)
+
+        if (padding.Length > Diffs[^1].Text.Length)
         {
-            var lastDiff = Diffs[^1];
-            var extraLength = padding.Length - lastDiff.Text.Length;
-            var text = lastDiff.Text + padding[..extraLength];
+            Diff lastDiff = Diffs[^1];
+            int extraLength = padding.Length - lastDiff.Text.Length;
+            string text = lastDiff.Text + padding[..extraLength];
 
             builder.RemoveAt(builder.Count - 1);
             builder.Add(lastDiff.Replace(text));
 
             return (s1, l1 + extraLength, s2, l2 + extraLength);
         }
-        else
-        {
-            return (s1, l1, s2, l2);
-        }
+
+        return (s1, l1, s2, l2);
 
     }
 
@@ -99,21 +97,21 @@ public record Patch(int Start1, int Length1, int Start2, int Length2, ImmutableL
     public override string ToString()
     {
 
-        var coords1 = Length1 switch
+        string coords1 = Length1 switch
         {
             0 => Start1 + ",0",
             1 => Convert.ToString(Start1 + 1),
             _ => Start1 + 1 + "," + Length1
         };
 
-        var coords2 = Length2 switch
+        string coords2 = Length2 switch
         {
             0 => Start2 + ",0",
             1 => Convert.ToString(Start2 + 1),
             _ => Start2 + 1 + "," + Length2
         };
 
-        var text = new StringBuilder()
+        StringBuilder text = new StringBuilder()
             .Append("@@ -")
             .Append(coords1)
             .Append(" +")
@@ -121,9 +119,9 @@ public record Patch(int Start1, int Length1, int Start2, int Length2, ImmutableL
             .Append(" @@\n");
 
         // Escape the body of the patch with %xx notation.
-        foreach (var aDiff in Diffs)
+        foreach (Diff aDiff in Diffs)
         {
-            text.Append((char)aDiff.Operation);
+            text.Append((char)aDiff.DiffOperation);
             text.Append(aDiff.Text.UrlEncoded()).Append("\n");
         }
 
@@ -140,10 +138,12 @@ public record Patch(int Start1, int Length1, int Start2, int Length2, ImmutableL
     /// <returns>List of Patch objects</returns>
     public static ImmutableListWithValueSemantics<Patch> Compute(string text1, string text2, float diffTimeout = 0, short diffEditCost = 4)
     {
-        using var cts = diffTimeout <= 0
-            ? new CancellationTokenSource()
-            : new CancellationTokenSource(TimeSpan.FromSeconds(diffTimeout));
-        return Compute(text1, DiffAlgorithm.Compute(text1, text2, true, true, cts.Token).CleanupSemantic().CleanupEfficiency(diffEditCost)).ToImmutableList().WithValueSemantics();
+        using (CancellationTokenSource cts = diffTimeout <= 0
+                   ? new CancellationTokenSource()
+                   : new CancellationTokenSource(TimeSpan.FromSeconds(diffTimeout)))
+        {
+            return Compute(text1, DiffAlgorithm.Compute(text1, text2, true, true, cts.Token).CleanupSemantic().CleanupEfficiency(diffEditCost)).ToImmutableList().WithValueSemantics();
+        }
     }
 
     /// <summary>
@@ -170,25 +170,25 @@ public record Patch(int Start1, int Length1, int Start2, int Length2, ImmutableL
             yield break;  // Get rid of the null case.
         }
 
-        var charCount1 = 0;  // Number of characters into the text1 string.
-        var charCount2 = 0;  // Number of characters into the text2 string.
+        int charCount1 = 0;  // Number of characters into the text1 string.
+        int charCount2 = 0;  // Number of characters into the text2 string.
                              // Start with text1 (prepatch_text) and apply the Diffs until we arrive at
                              // text2 (postpatch_text). We recreate the patches one by one to determine
                              // context info.
-        var prepatchText = text1;
-        var postpatchText = text1;
-        var newdiffs = ImmutableList.CreateBuilder<Diff>();
+        string prepatchText = text1;
+        string postpatchText = text1;
+        ImmutableList<Diff>.Builder newdiffs = ImmutableList.CreateBuilder<Diff>();
         int start1 = 0, length1 = 0, start2 = 0, length2 = 0;
-        foreach (var aDiff in diffs)
+        foreach (Diff aDiff in diffs)
         {
-            if (!newdiffs.Any() && aDiff.Operation != Equal)
+            if (newdiffs.Count == 0 && aDiff.DiffOperation != Equal)
             {
                 // A new patch starts here.
                 start1 = charCount1;
                 start2 = charCount2;
             }
 
-            switch (aDiff.Operation)
+            switch (aDiff.DiffOperation)
             {
                 case Insert:
                     newdiffs.Add(aDiff);
@@ -201,7 +201,7 @@ public record Patch(int Start1, int Length1, int Start2, int Length2, ImmutableL
                     postpatchText = postpatchText.Remove(charCount2, aDiff.Text.Length);
                     break;
                 case Equal:
-                    if (aDiff.Text.Length <= 2 * patchMargin && newdiffs.Any() && aDiff != diffs.Last())
+                    if (aDiff.Text.Length <= 2 * patchMargin && newdiffs.Count != 0 && aDiff != diffs.Last())
                     {
                         // Small equality inside a patch.
                         newdiffs.Add(aDiff);
@@ -212,7 +212,7 @@ public record Patch(int Start1, int Length1, int Start2, int Length2, ImmutableL
                     if (aDiff.Text.Length >= 2 * patchMargin)
                     {
                         // Time for a new patch.
-                        if (newdiffs.Any())
+                        if (newdiffs.Count != 0)
                         {
                             (start1, length1, start2, length2) = newdiffs.AddContext(prepatchText, start1, length1, start2, length2);
                             yield return new Patch(start1, length1, start2, length2, newdiffs.ToImmutable());
@@ -230,17 +230,17 @@ public record Patch(int Start1, int Length1, int Start2, int Length2, ImmutableL
             }
 
             // Update the current character count.
-            if (aDiff.Operation != Insert)
+            if (aDiff.DiffOperation != Insert)
             {
                 charCount1 += aDiff.Text.Length;
             }
-            if (aDiff.Operation != Delete)
+            if (aDiff.DiffOperation != Delete)
             {
                 charCount2 += aDiff.Text.Length;
             }
         }
         // Pick up the leftover patch if not empty.
-        if (newdiffs.Any())
+        if (newdiffs.Count != 0)
         {
             (start1, length1, start2, length2) = newdiffs.AddContext(prepatchText, start1, length1, start2, length2);
             yield return new Patch(start1, length1, start2, length2, newdiffs.ToImmutable());

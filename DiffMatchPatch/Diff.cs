@@ -1,20 +1,20 @@
 namespace DiffMatchPatch;
 
-public readonly record struct Diff(Operation Operation, string Text)
+public readonly record struct Diff(DiffOperation DiffOperation, string Text)
 {
-    internal static Diff Create(Operation operation, string text) => new(operation, text);
-    public static Diff Equal(ReadOnlySpan<char> text) => Create(Operation.Equal, text.ToString());
-    public static Diff Insert(ReadOnlySpan<char> text) => Create(Operation.Insert, text.ToString());
-    public static Diff Delete(ReadOnlySpan<char> text) => Create(Operation.Delete, text.ToString());
-    public static Diff Empty => new(Operation.Equal, string.Empty);
+    internal static Diff Create(DiffOperation diffOperation, string text) => new Diff(diffOperation, text);
+    public static Diff Equal(ReadOnlySpan<char> text) => Create(DiffOperation.Equal, text.ToString());
+    public static Diff Insert(ReadOnlySpan<char> text) => Create(DiffOperation.Insert, text.ToString());
+    public static Diff Delete(ReadOnlySpan<char> text) => Create(DiffOperation.Delete, text.ToString());
+    public static Diff Empty => new Diff(DiffOperation.Equal, string.Empty);
     /// <summary>
     /// Generate a human-readable version of this Diff.
     /// </summary>
     /// <returns></returns>
     public override string ToString()
     {
-        var prettyText = Text.Replace('\n', '\u00b6');
-        return "Diff(" + Operation + ",\"" + prettyText + "\")";
+        string prettyText = Text.Replace('\n', '\u00b6');
+        return "Diff(" + DiffOperation + ",\"" + prettyText + "\")";
     }
 
     internal Diff Replace(string text) => this with { Text = text };
@@ -33,7 +33,7 @@ public readonly record struct Diff(Operation Operation, string Text)
     /// <returns></returns>
     public static ImmutableList<Diff> Compute(string text1, string text2, float timeoutInSeconds = 0f, bool checklines = true)
     {
-        using var cts = timeoutInSeconds <= 0
+        using CancellationTokenSource cts = timeoutInSeconds <= 0
             ? new CancellationTokenSource()
             : new CancellationTokenSource(TimeSpan.FromSeconds(timeoutInSeconds));
         return Compute(text1, text2, checklines, timeoutInSeconds > 0, cts.Token);
@@ -42,6 +42,6 @@ public readonly record struct Diff(Operation Operation, string Text)
     public static ImmutableList<Diff> Compute(string text1, string text2, bool checkLines, bool optimizeForSpeed, CancellationToken token)
         => DiffAlgorithm.Compute(text1, text2, checkLines, optimizeForSpeed, token).ToImmutableList();
 
-    public bool IsLargeDelete(int size) => Operation == Operation.Delete && Text.Length > size;
+    public bool IsLargeDelete(int size) => DiffOperation == DiffOperation.Delete && Text.Length > size;
 
 }

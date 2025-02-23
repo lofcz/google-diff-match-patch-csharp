@@ -2,7 +2,7 @@
 
 public class ImmutableListWithValueSemantics<T> : IImmutableList<T>, IEquatable<IImmutableList<T>>
 {
-    readonly ImmutableList<T> _list;
+    private readonly ImmutableList<T> _list;
 
     public ImmutableListWithValueSemantics(ImmutableList<T> list) => _list = list;
 
@@ -46,7 +46,7 @@ public class ImmutableListWithValueSemantics<T> : IImmutableList<T>, IEquatable<
     public static bool operator !=(ImmutableListWithValueSemantics<T> left, ImmutableListWithValueSemantics<T> right) => !left.Equals(right);
 }
 
-static class Ex
+internal static class Ex
 {
-    public static ImmutableListWithValueSemantics<T> WithValueSemantics<T>(this ImmutableList<T> list) => new(list);
+    public static ImmutableListWithValueSemantics<T> WithValueSemantics<T>(this ImmutableList<T> list) => new ImmutableListWithValueSemantics<T>(list);
 }

@@ -1,8 +1,8 @@
-using static DiffMatchPatch.Operation;
+using static DiffMatchPatch.DiffOperation;
 
 namespace DiffMatchPatch;
 
-static class DiffAlgorithm
+internal static class DiffAlgorithm
 {
 
     /// <summary>
@@ -18,9 +18,9 @@ static class DiffAlgorithm
     internal static IEnumerable<Diff> Compute(ReadOnlySpan<char> text1, ReadOnlySpan<char> text2, bool checklines, bool optimizeForSpeed, CancellationToken token)
     {
         if (text1.Length == text2.Length && text1.Length == 0)
-            return Enumerable.Empty<Diff>();
+            return [];
 
-        var commonlength = TextUtil.CommonPrefix(text1, text2);
+        int commonlength = TextUtil.CommonPrefix(text1, text2);
 
         if (commonlength == text1.Length && commonlength == text2.Length)
         {
@@ -32,17 +32,17 @@ static class DiffAlgorithm
         }
 
         // Trim off common prefix (speedup).
-        var commonprefix = text1.Slice(0, commonlength);
+        ReadOnlySpan<char> commonprefix = text1[..commonlength];
         text1 = text1[commonlength..];
         text2 = text2[commonlength..];
 
         // Trim off common suffix (speedup).
         commonlength = TextUtil.CommonSuffix(text1, text2);
-        var commonsuffix = text1[^commonlength..];
-        text1 = text1.Slice(0, text1.Length - commonlength);
-        text2 = text2.Slice(0, text2.Length - commonlength);
+        ReadOnlySpan<char> commonsuffix = text1[^commonlength..];
+        text1 = text1[..^commonlength];
+        text2 = text2[..^commonlength];
 
-        List<Diff> diffs = new();
+        List<Diff> diffs = [];
         // Compute the diff on the middle block.
         if (commonprefix.Length != 0)
         {
@@ -89,54 +89,52 @@ static class DiffAlgorithm
             return Diff.Delete(text1).ItemAsEnumerable();
         }
 
-        var longtext = text1.Length > text2.Length ? text1 : text2;
-        var shorttext = text1.Length > text2.Length ? text2 : text1;
-        var i = longtext.IndexOf(shorttext, StringComparison.Ordinal);
+        ReadOnlySpan<char> longtext = text1.Length > text2.Length ? text1 : text2;
+        ReadOnlySpan<char> shorttext = text1.Length > text2.Length ? text2 : text1;
+        int i = longtext.IndexOf(shorttext, StringComparison.Ordinal);
         if (i != -1)
         {
             // Shorter text is inside the longer text (speedup).
             if (text1.Length > text2.Length)
             {
-                return new[]
-                {
-                        Diff.Delete(longtext.Slice(0, i)),
+                return
+                [
+                    Diff.Delete(longtext[..i]),
                         Diff.Equal(shorttext),
                         Diff.Delete(longtext[(i + shorttext.Length)..])
-                    };
+                ];
             }
-            else
-            {
-                return new[]
-                {
-                        Diff.Insert(longtext.Slice(0, i)),
-                        Diff.Equal(shorttext),
-                        Diff.Insert(longtext[(i + shorttext.Length)..])
-                    };
-            }
+
+            return
+            [
+                Diff.Insert(longtext[..i]),
+                Diff.Equal(shorttext),
+                Diff.Insert(longtext[(i + shorttext.Length)..])
+            ];
         }
 
         if (shorttext.Length == 1)
         {
             // Single character string.
             // After the previous speedup, the character can't be an equality.
-            return new[]
-            {
-                    Diff.Delete(text1),
+            return
+            [
+                Diff.Delete(text1),
                     Diff.Insert(text2)
-                };
+            ];
         }
 
         // Don't risk returning a non-optimal diff if we have unlimited time.
         if (optimizeForSpeed)
         {
             // Check to see if the problem can be split in two.
-            var result = TextUtil.HalfMatch(text1, text2);
+            HalfMatchResult result = TextUtil.HalfMatch(text1, text2);
             if (!result.IsEmpty)
             {
                 // A half-match was found, sort out the return data.
                 // Send both pairs off for separate processing.
-                var diffsA = Compute(result.Prefix1, result.Prefix2, checklines, optimizeForSpeed, token);
-                var diffsB = Compute(result.Suffix1, result.Suffix2, checklines, optimizeForSpeed, token);
+                IEnumerable<Diff> diffsA = Compute(result.Prefix1, result.Prefix2, checklines, optimizeForSpeed, token);
+                IEnumerable<Diff> diffsB = Compute(result.Suffix1, result.Suffix2, checklines, optimizeForSpeed, token);
 
                 // Merge the results.
                 return diffsA
@@ -164,10 +162,10 @@ static class DiffAlgorithm
     private static List<Diff> LineDiff(ReadOnlySpan<char> text1, ReadOnlySpan<char> text2, bool optimizeForSpeed, CancellationToken token)
     {
         // Scan the text on a line-by-line basis first.
-        var compressor = new LineToCharCompressor();
+        LineToCharCompressor compressor = new LineToCharCompressor();
         text1 = compressor.Compress(text1, char.MaxValue * 2 / 3);
         text2 = compressor.Compress(text2, char.MaxValue);
-        var diffs = Compute(text1, text2, false, optimizeForSpeed, token)
+        List<Diff> diffs = Compute(text1, text2, false, optimizeForSpeed, token)
             .Select(diff => diff.Replace(compressor.Decompress(diff.Text)))
             .ToList()
             .CleanupSemantic(); // Eliminate freak matches (e.g. blank lines)
@@ -178,31 +176,31 @@ static class DiffAlgorithm
     // Rediff any replacement blocks, this time character-by-character.
     private static IEnumerable<Diff> RediffAfterLineDiff(IEnumerable<Diff> diffs, bool optimizeForSpeed, CancellationToken token)
     {
-        var ins = new StringBuilder();
-        var del = new StringBuilder();
-        foreach (var diff in diffs.Concat(Diff.Empty))
+        StringBuilder ins = new StringBuilder();
+        StringBuilder del = new StringBuilder();
+        foreach (Diff diff in diffs.Concat(Diff.Empty))
         {
-            (ins, del) = diff.Operation switch
+            (ins, del) = diff.DiffOperation switch
             {
                 Insert => (ins.Append(diff.Text), del),
                 Delete => (ins, del.Append(diff.Text)),
                 _ => (ins, del)
             };
 
-            if (diff.Operation != Equal)
+            if (diff.DiffOperation != Equal)
             {
                 continue;
             }
 
-            var consolidatedDiffsBeforeEqual = diff.Operation switch
+            IEnumerable<Diff> consolidatedDiffsBeforeEqual = diff.DiffOperation switch
             {
                 Equal when ins.Length > 0 && del.Length > 0 => Compute(del.ToString(), ins.ToString(), false, optimizeForSpeed, token),
                 Equal when del.Length > 0 => Diff.Delete(del.ToString()).ItemAsEnumerable(),
                 Equal when ins.Length > 0 => Diff.Insert(ins.ToString()).ItemAsEnumerable(),
-                _ => Enumerable.Empty<Diff>()
+                _ => []
             };
 
-            foreach (var d in consolidatedDiffsBeforeEqual)
+            foreach (Diff d in consolidatedDiffsBeforeEqual)
             {
                 yield return d;
             }
@@ -228,34 +226,33 @@ static class DiffAlgorithm
     internal static IEnumerable<Diff> MyersDiffBisect(ReadOnlySpan<char> text1, ReadOnlySpan<char> text2, bool optimizeForSpeed, CancellationToken token)
     {
         // Cache the text lengths to prevent multiple calls.
-        var text1Length = text1.Length;
-        var text2Length = text2.Length;
-        var maxD = (text1Length + text2Length + 1) / 2;
-        var vOffset = maxD;
-        var vLength = 2 * maxD;
-        var v1 = new int[vLength];
-        var v2 = new int[vLength];
-        for (var x = 0; x < vLength; x++)
+        int text1Length = text1.Length;
+        int text2Length = text2.Length;
+        int maxD = (text1Length + text2Length + 1) / 2;
+        int vLength = 2 * maxD;
+        int[] v1 = new int[vLength];
+        int[] v2 = new int[vLength];
+        for (int x = 0; x < vLength; x++)
         {
             v1[x] = -1;
         }
-        for (var x = 0; x < vLength; x++)
+        for (int x = 0; x < vLength; x++)
         {
             v2[x] = -1;
         }
-        v1[vOffset + 1] = 0;
-        v2[vOffset + 1] = 0;
-        var delta = text1Length - text2Length;
+        v1[maxD + 1] = 0;
+        v2[maxD + 1] = 0;
+        int delta = text1Length - text2Length;
         // If the total number of characters is odd, then the front path will
         // collide with the reverse path.
-        var front = delta % 2 != 0;
+        bool front = delta % 2 != 0;
         // Offsets for start and end of k loop.
         // Prevents mapping of space beyond the grid.
-        var k1Start = 0;
-        var k1End = 0;
-        var k2Start = 0;
-        var k2End = 0;
-        for (var d = 0; d < maxD; d++)
+        int k1Start = 0;
+        int k1End = 0;
+        int k2Start = 0;
+        int k2End = 0;
+        for (int d = 0; d < maxD; d++)
         {
             // Bail out if cancelled.
             if (token.IsCancellationRequested)
@@ -264,9 +261,9 @@ static class DiffAlgorithm
             }
 
             // Walk the front path one step.
-            for (var k1 = -d + k1Start; k1 <= d - k1End; k1 += 2)
+            for (int k1 = -d + k1Start; k1 <= d - k1End; k1 += 2)
             {
-                var k1Offset = vOffset + k1;
+                int k1Offset = maxD + k1;
                 int x1;
                 if (k1 == -d || k1 != d && v1[k1Offset - 1] < v1[k1Offset + 1])
                 {
@@ -276,7 +273,7 @@ static class DiffAlgorithm
                 {
                     x1 = v1[k1Offset - 1] + 1;
                 }
-                var y1 = x1 - k1;
+                int y1 = x1 - k1;
                 while (x1 < text1Length && y1 < text2Length
                        && text1[x1] == text2[y1])
                 {
@@ -296,11 +293,11 @@ static class DiffAlgorithm
                 }
                 else if (front)
                 {
-                    var k2Offset = vOffset + delta - k1;
+                    int k2Offset = maxD + delta - k1;
                     if (k2Offset >= 0 && k2Offset < vLength && v2[k2Offset] != -1)
                     {
                         // Mirror x2 onto top-left coordinate system.
-                        var x2 = text1Length - v2[k2Offset];
+                        int x2 = text1Length - v2[k2Offset];
                         if (x1 >= x2)
                         {
                             // Overlap detected.
@@ -311,9 +308,9 @@ static class DiffAlgorithm
             }
 
             // Walk the reverse path one step.
-            for (var k2 = -d + k2Start; k2 <= d - k2End; k2 += 2)
+            for (int k2 = -d + k2Start; k2 <= d - k2End; k2 += 2)
             {
-                var k2Offset = vOffset + k2;
+                int k2Offset = maxD + k2;
                 int x2;
                 if (k2 == -d || k2 != d && v2[k2Offset - 1] < v2[k2Offset + 1])
                 {
@@ -323,7 +320,7 @@ static class DiffAlgorithm
                 {
                     x2 = v2[k2Offset - 1] + 1;
                 }
-                var y2 = x2 - k2;
+                int y2 = x2 - k2;
                 while (x2 < text1Length && y2 < text2Length
                        && text1[text1Length - x2 - 1]
                        == text2[text2Length - y2 - 1])
@@ -344,11 +341,11 @@ static class DiffAlgorithm
                 }
                 else if (!front)
                 {
-                    var k1Offset = vOffset + delta - k2;
+                    int k1Offset = maxD + delta - k2;
                     if (k1Offset >= 0 && k1Offset < vLength && v1[k1Offset] != -1)
                     {
-                        var x1 = v1[k1Offset];
-                        var y1 = vOffset + x1 - k1Offset;
+                        int x1 = v1[k1Offset];
+                        int y1 = maxD + x1 - k1Offset;
                         // Mirror x2 onto top-left coordinate system.
                         x2 = text1Length - v2[k2Offset];
                         if (x1 >= x2)
@@ -362,7 +359,7 @@ static class DiffAlgorithm
         }
         // Diff took too long and hit the deadline or
         // number of Diffs equals number of characters, no commonality at all.
-        return new[] { Diff.Delete(text1), Diff.Insert(text2) };
+        return [Diff.Delete(text1), Diff.Insert(text2)];
     }
 
     /// <summary>
@@ -378,14 +375,14 @@ static class DiffAlgorithm
     /// <returns></returns>
     private static IEnumerable<Diff> BisectSplit(ReadOnlySpan<char> text1, ReadOnlySpan<char> text2, int x, int y, bool optimizeForSpeed, CancellationToken token)
     {
-        var text1A = text1.Slice(0, x);
-        var text2A = text2.Slice(0, y);
-        var text1B = text1[x..];
-        var text2B = text2[y..];
+        ReadOnlySpan<char> text1A = text1[..x];
+        ReadOnlySpan<char> text2A = text2[..y];
+        ReadOnlySpan<char> text1B = text1[x..];
+        ReadOnlySpan<char> text2B = text2[y..];
 
         // Compute both Diffs serially.
-        var diffsa = Compute(text1A, text2A, false, optimizeForSpeed, token);
-        var diffsb = Compute(text1B, text2B, false, optimizeForSpeed, token);
+        IEnumerable<Diff> diffsa = Compute(text1A, text2A, false, optimizeForSpeed, token);
+        IEnumerable<Diff> diffsb = Compute(text1B, text2B, false, optimizeForSpeed, token);
 
         return diffsa.Concat(diffsb);
     }
